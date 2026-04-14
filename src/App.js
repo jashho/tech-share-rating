@@ -39,14 +39,14 @@ const App = () => {
 
   // 1. 在此定義兩位同仁的報告主題
   const sessions = [
-    { id: 'session-1', title: '報告人 A: PCIe Switch 異常 Link Down 排除與 BMC 監控機制' },
-    { id: 'session-2', title: '報告人 B: BIOS/UEFI 安全啟動規範與實作探討' }
+    { id: 'session-1', title: 'Steven (SW2C): Google OpenBMC structure and Project sharing' },
+    { id: 'session-2', title: 'Rex (SW2A): BIOS Project Experience​' }
   ];
   const [activeSession, setActiveSession] = useState(null);
 
   // 主管評分標準 (4項)
   const managerCriteria = [
-    { id: 'tech_depth', label: '技術深度與除錯思維', icon: <Cpu size={18} />, desc: '是否深入 Spec 找出 Root Cause。' },
+    { id: 'tech_depth', label: '技術深度與Debug思維', icon: <Cpu size={18} />, desc: '是否深入 Spec 找出 Root Cause。' },
     { id: 'cross_impact', label: '跨部門介面協作', icon: <Network size={18} />, desc: '是否清楚定義與 BIOS/BMC/Switch 的影響與協作。' },
     { id: 'solution_value', label: '專案實務價值', icon: <HardDrive size={18} />, desc: '解決方法是否能防止未來專案發生同樣錯誤。' },
     { id: 'doc_quality', label: '知識文件完整度', icon: <BookOpen size={18} />, desc: '內容是否足以作為 Knowledge Base 存檔。' }
