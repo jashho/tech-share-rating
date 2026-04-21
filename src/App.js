@@ -46,8 +46,8 @@ const App = () => {
 
   // 主管評分標準 (4項)
   const managerCriteria = [
-    { id: 'tech_depth', label: '技術深度與Debug思維', icon: <Cpu size={18} />, desc: '是否深入 Spec 找出 Root Cause。' },
-    { id: 'cross_impact', label: '跨部門介面協作', icon: <Network size={18} />, desc: '是否清楚定義與 BIOS/BMC/Switch 的影響與協作。' },
+    { id: 'tech_depth', label: '技術深度或Debug思維', icon: <Cpu size={18} />, desc: 'Function介紹是否清楚並深入/Debug過程是否有效率並找出Root Cause。' },
+    { id: 'cross_impact', label: '專案細節理解或技術應用', icon: <Network size={18} />, desc: '是否清楚整體專案需求或技術應用面。' },
     { id: 'solution_value', label: '專案實務價值', icon: <HardDrive size={18} />, desc: '解決方法是否能防止未來專案發生同樣錯誤。' },
     { id: 'doc_quality', label: '知識文件完整度', icon: <BookOpen size={18} />, desc: '內容是否足以作為 Knowledge Base 存檔。' }
   ];
@@ -99,28 +99,41 @@ const App = () => {
 
   const handleRatingSubmit = async (type) => {
     if (!user || !activeSession) return;
-    if (type === 'peer' && localStorage.getItem(`voted_${activeSession.id}`)) {
-      alert("您已經參與過本次評分囉！");
-      return;
-    }
-    if (type === 'manager' && !managerForm.managerName.trim()) {
-      alert("請輸入主管姓名");
-      return;
-    }
-
+    
     setLoading(true);
     try {
       const colName = type === 'manager' ? 'manager_ratings' : 'peer_ratings';
+      const storageKey = `voted_${type}_${activeSession.id}`;
+      const existingDocId = localStorage.getItem(storageKey);
+  
       const data = type === 'manager' ? managerForm : peerForm;
-      const targetCol = collection(db, 'artifacts', appId, 'public', 'data', colName);
-      
-      await addDoc(targetCol, { ...data, timestamp: new Date().toISOString(), shareId: activeSession.id });
-      if (type === 'peer') localStorage.setItem(`voted_${activeSession.id}`, 'true');
-      
-      setMessage({ type: 'success', text: '評分送出成功！' });
+      const payload = { 
+        ...data, 
+        timestamp: new Date().toISOString(), 
+        shareId: activeSession.id 
+      };
+  
+      if (type === 'manager' && existingDocId) {
+        // 如果是主管且已經投過，則更新該筆資料 (Update)
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', colName, existingDocId);
+        await updateDoc(docRef, payload);
+        setMessage({ type: 'success', text: '評分已更新！' });
+      } else {
+        // 第一次投球或同儕投球 (Add)
+        if (type === 'peer' && existingDocId) {
+          alert("同儕評分每場限投一次喔！");
+          setLoading(false);
+          return;
+        }
+        const targetCol = collection(db, 'artifacts', appId, 'public', 'data', colName);
+        const docRef = await addDoc(targetCol, payload);
+        localStorage.setItem(storageKey, docRef.id); // 記住這筆 ID
+        setMessage({ type: 'success', text: '評分送出成功！' });
+      }
+  
       setTimeout(() => { setView('home'); setActiveSession(null); setMessage(null); }, 2000);
     } catch (e) {
-      setMessage({ type: 'error', text: '送出失敗，請檢查網路。' });
+      setMessage({ type: 'error', text: '連線失敗，請重試。' });
     } finally {
       setLoading(false);
     }
