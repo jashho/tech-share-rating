@@ -1,256 +1,337 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 import { 
-  ShieldCheck, Users, Share2, Lightbulb, 
-  BookOpen, MessageSquare, HardDrive, Cpu, Network, LayoutDashboard, RefreshCw, ChevronRight
+  ShieldCheck, Users, Trophy, Star, MessageSquare, ChevronLeft, LayoutDashboard, Send, Share2
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, collection, addDoc, onSnapshot, query, where 
+  getFirestore, collection, addDoc, onSnapshot, doc, updateDoc 
 } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 
-// --- 請務必在此處填上您的 Firebase 設定 ---
-const firebaseConfig = {
-  apiKey: "AIzaSyBy3mpEPQDVe48GNgOCLnlXSFD2eT1jyWs",
-  authDomain: "tech-share-system.firebaseapp.com",
-  projectId: "tech-share-system",
-  storageBucket: "tech-share-system.firebasestorage.app",
-  messagingSenderId: "136150031374",
-  appId: "1:136150031374:web:8c6131ee29dfa64e2cf05f"
-};
+// Firebase 初始化與環境變數處理
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : { apiKey: "", authDomain: "", projectId: "", storageBucket: "", messagingSenderId: "", appId: "" };
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = 'tech-share-multi-session'; 
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'tech-share-v3';
 
 const App = () => {
   const [user, setUser] = useState(null);
   const [view, setView] = useState('home'); 
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [authError, setAuthError] = useState(null);
   const [message, setMessage] = useState(null);
-  const [stats, setStats] = useState({ manager: [], peer: [] });
-
-  // 1. 在此定義兩位同仁的報告主題
+  
+  // 場次清單：後續只需在此新增物件即可
   const sessions = [
-    { id: 'session-1', title: 'Steven (SW2C): Google OpenBMC structure and Project sharing' },
-    { id: 'session-2', title: 'Rex (SW2A): BIOS Project Experience​' }
+    { id: '20240421_A', title: '報告人 A: PCIe Switch 異常排除' },
+    { id: '20240421_B', title: '報告人 B: BIOS Secure Boot 實作' },
+    { id: '20240505_C', title: '報告人 C: NVMe SSD 效能調優' }
   ];
+  
   const [activeSession, setActiveSession] = useState(null);
+  const [allData, setAllData] = useState({ manager: [], peer: [] });
 
-  // 主管評分標準 (4項)
+  // 評分標準
   const managerCriteria = [
-    { id: 'tech_depth', label: '技術深度或Debug思維', icon: <Cpu size={18} />, desc: 'Function介紹是否清楚並深入/Debug過程是否有效率並找出Root Cause。' },
-    { id: 'cross_impact', label: '專案細節理解或技術應用', icon: <Network size={18} />, desc: '是否清楚整體專案需求或技術應用面。' },
-    { id: 'solution_value', label: '專案實務價值', icon: <HardDrive size={18} />, desc: '解決方法是否能防止未來專案發生同樣錯誤。' },
-    { id: 'doc_quality', label: '知識文件完整度', icon: <BookOpen size={18} />, desc: '內容是否足以作為 Knowledge Base 存檔。' }
+    { id: 'tech_depth', label: '技術深度' },
+    { id: 'cross_impact', label: '跨部門協作' },
+    { id: 'solution_value', label: '實務價值' },
+    { id: 'doc_quality', label: '文件完整度' }
   ];
 
-  // 同儕評分標準 (4項)
   const peerCriteria = [
-    { id: 'understanding', label: '跨部門運作了解度', icon: <Share2 size={18} />, desc: '聽完後我是否更了解其他部門的工作內容。' },
-    { id: 'takeaway', label: '知識獲取感', icon: <Lightbulb size={18} />, desc: '對我未來開發是否有實質啟發。' },
-    { id: 'clarity', label: '表達清晰度', icon: <MessageSquare size={18} />, desc: '能否將複雜底層術語講得淺顯易懂。' },
-    { id: 'interactivity', label: '問答互動表現', icon: <Users size={18} />, desc: '對現場提問的掌握度。' }
+    { id: 'understanding', label: '理解度' },
+    { id: 'takeaway', label: '啟發感' },
+    { id: 'clarity', label: '清晰度' },
+    { id: 'interactivity', label: '互動性' }
   ];
 
-  // Firebase 認證與重試
-  const initAuth = useCallback(async (retryCount = 0) => {
-    try {
-      setAuthError(null);
-      await signInAnonymously(auth);
-    } catch (error) {
-      if (retryCount < 3) setTimeout(() => initAuth(retryCount + 1), 2000);
-      else setAuthError("網路連線失敗，請檢查網路狀態。");
-    }
-  }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('role') === 'admin') setIsAdmin(true);
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
-    return () => unsubscribe();
-  }, [initAuth]);
-
-  // 根據選擇的主題載入對應數據
-  useEffect(() => {
-    if (!user || !activeSession) return;
-    const managerCol = collection(db, 'artifacts', appId, 'public', 'data', 'manager_ratings');
-    const peerCol = collection(db, 'artifacts', appId, 'public', 'data', 'peer_ratings');
-
-    const unsubM = onSnapshot(query(managerCol, where("shareId", "==", activeSession.id)), (snap) => {
-      setStats(prev => ({ ...prev, manager: snap.docs.map(d => d.data()) }));
-    });
-    const unsubP = onSnapshot(query(peerCol, where("shareId", "==", activeSession.id)), (snap) => {
-      setStats(prev => ({ ...prev, peer: snap.docs.map(d => d.data()) }));
-    });
-    return () => { unsubM(); unsubP(); };
-  }, [user, activeSession]);
-
+  // 表單狀態
   const [managerForm, setManagerForm] = useState({ managerName: '', tech_depth: 5, cross_impact: 5, solution_value: 5, doc_quality: 5, comments: '' });
   const [peerForm, setPeerForm] = useState({ understanding: 5, takeaway: 5, clarity: 5, interactivity: 5, comments: '' });
 
+  useEffect(() => {
+    // 身份檢查
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('role') === 'admin') setIsAdmin(true);
+
+    // Firebase 認證流程 (Rule 3)
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+    };
+    initAuth();
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsubscribeAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    // 監聽數據 (Rule 1 & 2)
+    const qM = collection(db, 'artifacts', appId, 'public', 'data', 'manager_ratings');
+    const qP = collection(db, 'artifacts', appId, 'public', 'data', 'peer_ratings');
+
+    const unsubM = onSnapshot(qM, (snap) => {
+      setAllData(prev => ({ ...prev, manager: snap.docs.map(d => ({id: d.id, ...d.data()})) }));
+    }, (err) => console.error("Firestore Manager Query Error:", err));
+
+    const unsubP = onSnapshot(qP, (snap) => {
+      setAllData(prev => ({ ...prev, peer: snap.docs.map(d => ({id: d.id, ...d.data()})) }));
+    }, (err) => console.error("Firestore Peer Query Error:", err));
+
+    return () => { unsubM(); unsubP(); };
+  }, [user]);
+
+  // 提交邏輯
   const handleRatingSubmit = async (type) => {
     if (!user || !activeSession) return;
-    
     setLoading(true);
+    
     try {
       const colName = type === 'manager' ? 'manager_ratings' : 'peer_ratings';
       const storageKey = `voted_${type}_${activeSession.id}`;
       const existingDocId = localStorage.getItem(storageKey);
-  
-      const data = type === 'manager' ? managerForm : peerForm;
-      const payload = { 
-        ...data, 
-        timestamp: new Date().toISOString(), 
-        shareId: activeSession.id 
+      
+      const payload = {
+        ...(type === 'manager' ? managerForm : peerForm),
+        shareId: activeSession.id,
+        userId: user.uid,
+        timestamp: new Date().toISOString()
       };
-  
+
       if (type === 'manager' && existingDocId) {
-        // 如果是主管且已經投過，則更新該筆資料 (Update)
+        // 更新制 (主管修改評語)
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', colName, existingDocId);
         await updateDoc(docRef, payload);
-        setMessage({ type: 'success', text: '評分已更新！' });
       } else {
-        // 第一次投球或同儕投球 (Add)
-        if (type === 'peer' && existingDocId) {
-          alert("同儕評分每場限投一次喔！");
-          setLoading(false);
-          return;
-        }
-        const targetCol = collection(db, 'artifacts', appId, 'public', 'data', colName);
-        const docRef = await addDoc(targetCol, payload);
-        localStorage.setItem(storageKey, docRef.id); // 記住這筆 ID
-        setMessage({ type: 'success', text: '評分送出成功！' });
+        // 新增制
+        const colRef = collection(db, 'artifacts', appId, 'public', 'data', colName);
+        const docRef = await addDoc(colRef, payload);
+        localStorage.setItem(storageKey, docRef.id);
       }
-  
-      setTimeout(() => { setView('home'); setActiveSession(null); setMessage(null); }, 2000);
+      
+      setMessage({ type: 'success', text: '提交成功！' });
+      setTimeout(() => { setView('home'); setMessage(null); setActiveSession(null); }, 1500);
     } catch (e) {
-      setMessage({ type: 'error', text: '連線失敗，請重試。' });
-    } finally {
-      setLoading(false);
+      console.error(e);
+      setMessage({ type: 'error', text: '提交失敗，請檢查網路。' });
+    } finally { 
+      setLoading(false); 
     }
   };
 
-  const getAverage = (data, field) => {
+  const getAvgScore = (sId, type) => {
+    const data = allData[type].filter(d => d.shareId === sId);
     if (!data.length) return 0;
-    const valid = data.filter(d => d[field] !== undefined);
-    return valid.length ? (valid.reduce((a, b) => a + (Number(b[field]) || 0), 0) / valid.length).toFixed(1) : 0;
+    const criteria = type === 'manager' ? managerCriteria : peerCriteria;
+    let total = 0;
+    data.forEach(d => criteria.forEach(c => total += (Number(d[c.id]) || 0)));
+    return (total / (data.length * criteria.length)).toFixed(1);
   };
 
+  const RatingField = ({ label, value, onChange }) => (
+    <div className="mb-4">
+      <div className="flex justify-between mb-1">
+        <label className="text-sm font-medium text-slate-700">{label}</label>
+        <span className="text-sm font-bold text-blue-600">{value} 分</span>
+      </div>
+      <input 
+        type="range" min="1" max="10" value={value} 
+        onChange={(e) => onChange(parseInt(e.target.value))}
+        className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+      />
+    </div>
+  );
+
   return (
-    <div style={{ maxWidth: '850px', margin: '0 auto', padding: '20px', fontFamily: 'sans-serif', color: '#1e293b' }}>
-      <header style={{ textAlign: 'center', marginBottom: '30px' }}>
-        <h1 style={{ fontSize: '26px', fontWeight: '900', color: '#0f172a' }}>軟體部門 Tech-Share 評分系統</h1>
-      </header>
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
+      <div className="max-w-2xl mx-auto">
+        
+        {message && (
+          <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-lg text-white font-bold ${message.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
+            {message.text}
+          </div>
+        )}
 
-      {authError && <div style={{ padding: '15px', borderRadius: '10px', backgroundColor: '#fff1f2', color: '#9f1239', marginBottom: '20px' }}>{authError}</div>}
-      {message && <div style={{ padding: '15px', borderRadius: '10px', backgroundColor: '#dcfce7', color: '#166534', textAlign: 'center', marginBottom: '20px' }}>{message.text}</div>}
-
-      {/* 首頁：場次選擇 */}
-      {view === 'home' && (
-        <div style={{ display: 'grid', gap: '20px' }}>
-          <h3 style={{ fontWeight: '800', borderLeft: '5px solid #2563eb', paddingLeft: '15px', margin: '10px 0' }}>請選擇今日報告場次進行評分：</h3>
-          {sessions.map((s) => (
-            <div key={s.id} style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '20px', padding: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-              <div style={{ fontWeight: '800', marginBottom: '20px', fontSize: '18px', color: '#1e293b' }}>{s.title}</div>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button onClick={() => { setActiveSession(s); setView('peer'); }} style={{ flex: 1, padding: '14px', borderRadius: '12px', border: '2px solid #4f46e5', color: '#4f46e5', background: 'white', cursor: 'pointer', fontWeight: 'bold' }}>同儕評分</button>
-                {isAdmin && <button onClick={() => { setActiveSession(s); setView('manager'); }} style={{ flex: 1, padding: '14px', borderRadius: '12px', background: '#2563eb', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>主管評分</button>}
-                {isAdmin && <button onClick={() => { setActiveSession(s); setView('dashboard'); }} style={{ padding: '14px', borderRadius: '12px', background: '#0f172a', color: 'white', border: 'none', cursor: 'pointer' }}><LayoutDashboard size={20}/></button>}
+        {view === 'home' && (
+          <div className="space-y-6">
+            <header className="text-center py-8">
+              <div className="inline-block p-3 bg-blue-100 rounded-2xl mb-4 text-blue-600">
+                <Share2 size={32} />
               </div>
-            </div>
-          ))}
-          <footer style={{ textAlign: 'center', marginTop: '40px', color: '#94a3b8', fontSize: '13px' }}>
-            © 軟體部門 Tech-Share 系統 | 請根據當下報告內容進入對應場次
-          </footer>
-        </div>
-      )}
+              <h1 className="text-2xl font-bold text-slate-800">軟體部 Tech-Share 評分系統</h1>
+              <p className="text-slate-500">技術交流，共同進步</p>
+            </header>
 
-      {/* 評分表介面 */}
-      {(view === 'manager' || view === 'peer') && (
-        <div style={{ background: 'white', padding: '30px', borderRadius: '24px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)', border: '1px solid #f1f5f9' }}>
-          <button onClick={() => { setView('home'); setActiveSession(null); }} style={{ marginBottom: '20px', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' }}>← 返回場次列表</button>
-          <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', marginBottom: '25px', borderLeft: '4px solid #2563eb' }}>
-            <div style={{ fontSize: '13px', color: '#64748b' }}>正在為以下項目評分：</div>
-            <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{activeSession?.title}</div>
-          </div>
-          
-          {view === 'manager' && (
-            <div style={{ marginBottom: '30px' }}>
-              <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '10px' }}>主管姓名 (實名)</label>
-              <input type="text" placeholder="請輸入姓名..." style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '2px solid #e2e8f0', boxSizing: 'border-box' }} value={managerForm.managerName} onChange={(e) => setManagerForm({...managerForm, managerName: e.target.value})} />
-            </div>
-          )}
+            {isAdmin && (
+              <button 
+                onClick={() => setView('dashboard')}
+                className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all shadow-md"
+              >
+                <LayoutDashboard size={20} /> 查看場次對比看板
+              </button>
+            )}
 
-          {(view === 'manager' ? managerCriteria : peerCriteria).map(c => (
-            <div key={c.id} style={{ marginBottom: '24px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>{c.icon} {c.label}</div>
-              <div style={{ fontSize: '12px', color: '#64748b', marginLeft: '26px', marginBottom: '8px' }}>{c.desc}</div>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginLeft: '26px' }}>
-                {[1,2,3,4,5,6,7,8,9,10].map(n => (
-                  <button key={n} onClick={() => view === 'manager' ? setManagerForm({...managerForm, [c.id]: n}) : setPeerForm({...peerForm, [c.id]: n})} 
-                    style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: (view === 'manager' ? managerForm[c.id] : peerForm[c.id]) === n ? '#2563eb' : '#f1f5f9', color: (view === 'manager' ? managerForm[c.id] : peerForm[c.id]) === n ? 'white' : '#64748b', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>{n}</button>
-                ))}
-              </div>
-            </div>
-          ))}
-
-          <div style={{ marginTop: '20px' }}>
-            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px' }}>具體評論與建議</label>
-            <textarea style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '2px solid #e2e8f0', minHeight: '100px', boxSizing: 'border-box' }} placeholder="請留下具體的回饋..." value={view === 'manager' ? managerForm.comments : peerForm.comments} onChange={(e) => view === 'manager' ? setManagerForm({...managerForm, comments: e.target.value}) : setPeerForm({...peerForm, comments: e.target.value})} />
-          </div>
-
-          <button onClick={() => handleRatingSubmit(view)} disabled={loading} style={{ width: '100%', marginTop: '30px', padding: '18px', borderRadius: '15px', background: '#2563eb', color: 'white', border: 'none', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '16px' }}>{loading ? '送出中...' : '提交評分結果'}</button>
-        </div>
-      )}
-
-      {/* 數據看板 */}
-      {view === 'dashboard' && (
-        <div style={{ background: 'white', padding: '25px', borderRadius: '24px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}>
-          <button onClick={() => { setView('home'); setActiveSession(null); }} style={{ marginBottom: '20px', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontWeight: 'bold' }}>← 返回列表</button>
-          <h3 style={{ marginBottom: '20px' }}>{activeSession?.title} 數據統計</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '20px' }}>
-            <div style={{ height: '380px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #e2e8f0' }}>
-              <h4 style={{ textAlign: 'center', fontSize: '14px' }}>主管平均視角</h4>
-              <ResponsiveContainer width="100%" height="90%">
-                <RadarChart cx="50%" cy="50%" outerRadius="80%" data={managerCriteria.map(c => ({ subject: c.label.substring(0,4), A: getAverage(stats.manager, c.id) }))}>
-                  <PolarGrid /><PolarAngleAxis dataKey="subject" fontSize={11}/><Radar dataKey="A" stroke="#2563eb" fill="#2563eb" fillOpacity={0.6} />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-            <div style={{ height: '380px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #e2e8f0' }}>
-              <h4 style={{ textAlign: 'center', fontSize: '14px' }}>同儕回饋統計</h4>
-              <ResponsiveContainer width="100%" height="90%">
-                <BarChart data={peerCriteria.map(c => ({ name: c.label.substring(0,3), score: getAverage(stats.peer, c.id) }))}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" fontSize={11}/><YAxis domain={[0, 10]} /><Tooltip /><Bar dataKey="score" fill="#4f46e5" radius={[5, 5, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-          <div style={{ marginTop: '30px' }}>
-            <h4 style={{ marginBottom: '15px' }}>評論彙整 ({stats.manager.length + stats.peer.length})</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {[...stats.manager, ...stats.peer].sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)).map((m, i) => (
-                <div key={i} style={{ padding: '15px', background: m.managerName ? '#eff6ff' : '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-                    <strong>{m.managerName ? `⚖️ 主管: ${m.managerName}` : '💬 匿名同儕'}</strong>
-                    <span style={{ color: '#94a3b8' }}>{new Date(m.timestamp).toLocaleString()}</span>
+            <div className="grid gap-4">
+              {sessions.map(s => (
+                <div key={s.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                  <div className="flex-1">
+                    <h3 className="font-bold text-slate-800">{s.title}</h3>
+                    <div className="flex gap-3 mt-1 text-xs text-slate-400">
+                      <span className="flex items-center gap-1"><Users size={12}/> {allData.peer.filter(d => d.shareId === s.id).length} 份回饋</span>
+                      {isAdmin && <span className="flex items-center gap-1 text-blue-500"><ShieldCheck size={12}/> 管理員模式</span>}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '14px' }}>{m.comments || '(無留言)'}</div>
+                  <button 
+                    onClick={() => { setActiveSession(s); setView(isAdmin ? 'manager' : 'peer'); }}
+                    className="ml-4 px-5 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    進入評分
+                  </button>
                 </div>
               ))}
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {(view === 'manager' || view === 'peer') && activeSession && (
+          <div className="bg-white p-6 rounded-3xl shadow-xl border border-slate-100 animate-in fade-in slide-in-from-bottom-4">
+            <button onClick={() => setView('home')} className="flex items-center text-slate-400 mb-6 hover:text-slate-600">
+              <ChevronLeft size={20} /> 返回首頁
+            </button>
+            
+            <div className="mb-8">
+              <span className="text-xs font-bold px-3 py-1 bg-blue-50 text-blue-600 rounded-full">
+                {view === 'manager' ? '主管評分模式' : '同儕評分模式'}
+              </span>
+              <h2 className="text-xl font-bold mt-2">{activeSession.title}</h2>
+            </div>
+
+            <div className="space-y-6">
+              {view === 'manager' && (
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">主管姓名</label>
+                  <input 
+                    type="text" 
+                    value={managerForm.managerName}
+                    onChange={(e) => setManagerForm({...managerForm, managerName: e.target.value})}
+                    placeholder="請輸入您的姓名"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+              )}
+
+              {(view === 'manager' ? managerCriteria : peerCriteria).map(c => (
+                <RatingField 
+                  key={c.id} 
+                  label={c.label} 
+                  value={view === 'manager' ? managerForm[c.id] : peerForm[c.id]} 
+                  onChange={(val) => {
+                    if (view === 'manager') setManagerForm({...managerForm, [c.id]: val});
+                    else setPeerForm({...peerForm, [c.id]: val});
+                  }}
+                />
+              ))}
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">具體評語 / 建議</label>
+                <textarea 
+                  rows="4"
+                  value={view === 'manager' ? managerForm.comments : peerForm.comments}
+                  onChange={(e) => {
+                    if (view === 'manager') setManagerForm({...managerForm, comments: e.target.value});
+                    else setPeerForm({...peerForm, comments: e.target.value});
+                  }}
+                  placeholder="寫下您的看法..."
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                />
+              </div>
+
+              <button 
+                onClick={() => handleRatingSubmit(view)}
+                disabled={loading}
+                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 disabled:opacity-50 shadow-lg shadow-blue-200"
+              >
+                {loading ? '送出中...' : <><Send size={18} /> 提交評分</>}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {view === 'dashboard' && (
+          <div className="bg-white p-6 rounded-3xl shadow-xl border border-slate-100">
+            <button onClick={() => setView('home')} className="flex items-center text-slate-400 mb-6">
+              <ChevronLeft size={20} /> 返回
+            </button>
+            
+            <div className="flex items-center gap-3 mb-8">
+              <div className="p-2 bg-amber-100 text-amber-600 rounded-xl"><Trophy size={24}/></div>
+              <h2 className="text-xl font-bold">報告人綜合表現對比</h2>
+            </div>
+
+            <div className="h-80 w-full mb-8">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={sessions.map(s => ({
+                  name: s.title.split(':')[0].replace('報告人 ', ''),
+                  '主管': Number(getAvgScore(s.id, 'manager')),
+                  '同儕': Number(getAvgScore(s.id, 'peer'))
+                }))}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 10]} axisLine={false} tickLine={false} />
+                  <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'}} />
+                  <Legend iconType="circle" />
+                  <Bar dataKey="主管" fill="#2563eb" radius={[4, 4, 0, 0]} barSize={30} />
+                  <Bar dataKey="同儕" fill="#10b981" radius={[4, 4, 0, 0]} barSize={30} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="font-bold text-slate-800 flex items-center gap-2"><MessageSquare size={18}/> 各場次詳細評語</h4>
+              {sessions.map(s => (
+                <div key={s.id} className="border border-slate-100 rounded-2xl overflow-hidden">
+                  <div className="bg-slate-50 p-4 font-bold text-sm text-slate-700 border-bottom border-slate-100">
+                    {s.title}
+                  </div>
+                  <div className="p-4 space-y-3 max-h-40 overflow-y-auto">
+                    {allData.manager.filter(d => d.shareId === s.id).map((m, i) => (
+                      <div key={i} className="text-sm bg-blue-50 p-3 rounded-xl text-blue-800">
+                        <span className="font-bold">主管 ({m.managerName || '未知'}):</span> {m.comments || '(無評語)'}
+                      </div>
+                    ))}
+                    {allData.peer.filter(d => d.shareId === s.id).map((p, i) => (
+                      <div key={i} className="text-sm text-slate-600 border-l-4 border-emerald-200 pl-3 py-1">
+                        {p.comments || '(無評語)'}
+                      </div>
+                    ))}
+                    {allData.peer.filter(d => d.shareId === s.id).length === 0 && allData.manager.filter(d => d.shareId === s.id).length === 0 && (
+                      <div className="text-sm text-slate-400 italic">目前尚無評語</div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+      </div>
     </div>
   );
 };
