@@ -4,8 +4,8 @@ import {
 } from 'recharts';
 import { 
   Users, Share2, Lightbulb, 
-  BookOpen, MessageSquare, HardDrive, Cpu, Network, LayoutDashboard, Trophy
-} from 'lucide-react';
+  BookOpen, MessageSquare, HardDrive, Cpu, Network
+} from 'lucide-react'; // 移除 LayoutDashboard 與 Trophy
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, addDoc, onSnapshot, doc, updateDoc 
