@@ -1,18 +1,16 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react'; // 刪除了 useCallback
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-  Radar, RadarChart, PolarGrid, PolarAngleAxis
-} from 'recharts';
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+} from 'recharts'; // 刪除了 Radar, RadarChart, PolarGrid, PolarAngleAxis
 import { 
-  ShieldCheck, Users, Share2, Lightbulb, 
-  BookOpen, MessageSquare, HardDrive, Cpu, Network, LayoutDashboard, Send, ChevronLeft, Trophy
-} from 'lucide-react';
+  Users, Share2, Lightbulb, 
+  BookOpen, MessageSquare, HardDrive, Cpu, Network, LayoutDashboard, Trophy
+} from 'lucide-react'; // 刪除了 ShieldCheck, Send, ChevronLeft
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, collection, addDoc, onSnapshot, query, doc, updateDoc 
-} from 'firebase/firestore';
+  getFirestore, collection, addDoc, onSnapshot, doc, updateDoc 
+} from 'firebase/firestore'; // 刪除了 query[cite: 1]
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-
 
 // --- Firebase 設定 ---
 const firebaseConfig = {
